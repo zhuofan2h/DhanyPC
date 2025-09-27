@@ -43,7 +43,7 @@ jobs:
           echo "--- Starting Automatic Installation ---"
 
           # --- Instalasi WinRAR ---
-          $winrarInstaller = "C:\persist\winrar-x64-installer.exe" # Ganti nama file jika perlu
+          $winrarInstaller = "C:\persist\winrar-7-13-0.exe" # Ganti nama file jika perlu
           if (Test-Path $winrarInstaller) {
             echo "WinRAR installer found. Starting silent installation..."
             Start-Process -FilePath $winrarInstaller -ArgumentList "/S" -Wait
