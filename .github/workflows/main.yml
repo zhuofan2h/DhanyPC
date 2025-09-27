@@ -13,15 +13,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup rclone and Load Config
+        # Menggunakan shell powershell untuk konsistensi
+        shell: powershell
         run: |
           echo "Installing rclone..."
           choco install rclone -y
           echo "Creating rclone config directory..."
           $configPath = "C:\Users\runneradmin\.config\rclone"
           New-Item -ItemType Directory -Force -Path $configPath
-          echo "Writing rclone config from secret..."
-          # Cara ini memastikan format multiline tetap terjaga
-          Add-Content -Path "$configPath\rclone.conf" -Value "${{ secrets.RCLONE_CONF }}"
+          echo "Writing rclone config from secret using here-string..."
+          # PERBAIKAN: Menggunakan Set-Content dengan here-string untuk menjaga format multiline
+          Set-Content -Path "$configPath\rclone.conf" -Value @"
+          ${{ secrets.RCLONE_CONF }}
+          "@
           echo "rclone setup complete. Verifying config:"
           rclone config show
 
