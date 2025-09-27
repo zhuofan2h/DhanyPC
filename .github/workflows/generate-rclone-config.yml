@@ -19,16 +19,22 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "dhasap"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "dhasap"
 
-          # Install dan hubungkan Tailscale
+          # --- PERBAIKAN DIMULAI DI SINI ---
+          # Install Tailscale dan tunggu sampai selesai
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
-          ./tailscale-setup.exe /quiet
+          Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/quiet" -Wait
+
+          # Tambahkan direktori Tailscale ke PATH untuk sesi ini
+          $env:Path += ";C:\Program Files\Tailscale"
           
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-config-$env:GITHUB_RUN_ID
+          # Hubungkan Tailscale (sekarang bisa dipanggil langsung)
+          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-config-$env:GITHUB_RUN_ID
+          # --- AKHIR DARI PERBAIKAN ---
           
           # Tunggu IP Tailscale
           $tsIP = $null; $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              $tsIP = tailscale ip -4
               Start-Sleep -Seconds 5; $retries++
           }
           if (-not $tsIP) { Write-Error "Tailscale IP not assigned."; exit 1 }
