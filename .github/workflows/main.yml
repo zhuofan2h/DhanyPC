@@ -20,7 +20,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path "C:\Users\runneradmin\.config\rclone"
           echo "Writing rclone config from secret..."
           echo "${{ secrets.RCLONE_CONF }}" | Out-File -FilePath "C:\Users\runneradmin\.config\rclone\rclone.conf" -Encoding "utf8"
-          echo "rclone setup complete. Verifying remotes:"
+          echo "rclone setup complete. Verifying config:"
+          rclone config show # Menampilkan konfigurasi yang dimuat untuk debugging
+          echo "Verifying remotes:"
           rclone listremotes
 
       - name: Download Persistent Data from Cloud
@@ -28,8 +30,7 @@ jobs:
           echo "Creating persistent directory..."
           New-Item -ItemType Directory -Force -Path "C:\Users\runneradmin\Desktop\persist"
           echo "Syncing data from cloud..."
-          # Menggunakan 'gdrive' sebagai nama remote, sesuaikan jika nama di rclone.conf Anda berbeda
-          # 'RDP_Backup' adalah nama folder di Google Drive Anda
+          # Pastikan nama remote 'gdrive' dan folder 'RDP_Backup' sesuai dengan konfigurasi Anda
           rclone copy gdrive:/RDP_Backup C:\Users\runneradmin\Desktop\persist --progress
 
       - name: Configure Core RDP & User
@@ -84,4 +85,4 @@ jobs:
           echo "Syncing data to cloud..."
           # Pastikan nama remote 'gdrive' dan folder 'RDP_Backup' sesuai dengan konfigurasi Anda
           rclone copy C:\Users\runneradmin\Desktop\persist gdrive:/RDP_Backup --progress
-          
+
