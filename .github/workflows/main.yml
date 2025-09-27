@@ -1,4 +1,4 @@
-name: RDP with Persistent Storage
+name: RDP with Persistent Storage & Apps
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup rclone and Load Config
-        # Menggunakan shell powershell untuk konsistensi
         shell: powershell
         run: |
           echo "Installing rclone..."
@@ -22,22 +21,50 @@ jobs:
           $configPath = "C:\Users\runneradmin\.config\rclone"
           New-Item -ItemType Directory -Force -Path $configPath
           echo "Writing rclone config from secret using here-string..."
-          # PERBAIKAN: Menggunakan Set-Content dengan here-string untuk menjaga format multiline
           Set-Content -Path "$configPath\rclone.conf" -Value @"
           ${{ secrets.RCLONE_CONF }}
           "@
-          echo "rclone setup complete. Verifying config:"
+          echo "rclone setup complete."
           rclone config show
 
       - name: Restore Persistent Data from Cloud
+        shell: powershell
         run: |
-          echo "Creating persistent directory..."
-          $persistPath = "C:\Users\runneradmin\Desktop\persist"
+          $persistPath = "C:\persist"
+          echo "Creating persistent directory: $persistPath"
           New-Item -ItemType Directory -Force -Path $persistPath
-          echo "Restoring data from cloud..."
-          # Menggunakan 'gdrive' sebagai nama remote
-          # 'RDP_Backup' adalah nama folder di Google Drive Anda
-          rclone copy gdrive:/RDP_Backup $persistPath --progress
+          echo "Restoring data and apps from cloud..."
+          # Menggunakan sync agar file yang dihapus di Drive juga ikut terhapus di runner
+          rclone sync gdrive:/RDP_Backup $persistPath --progress
+
+      - name: Install Persisted Applications
+        shell: powershell
+        run: |
+          echo "--- Starting Automatic Installation ---"
+
+          # --- Instalasi WinRAR ---
+          $winrarInstaller = "C:\persist\winrar-x64-installer.exe" # Ganti nama file jika perlu
+          if (Test-Path $winrarInstaller) {
+            echo "WinRAR installer found. Starting silent installation..."
+            Start-Process -FilePath $winrarInstaller -ArgumentList "/S" -Wait
+            echo "WinRAR installation complete."
+          } else {
+            echo "WinRAR installer not found. Skipping."
+          }
+
+          # --- CONTOH: Instalasi Notepad++ ---
+          $notepadInstaller = "C:\persist\npp.installer.x64.exe" # Ganti nama file jika perlu
+          if (Test-Path $notepadInstaller) {
+            echo "Notepad++ installer found. Starting silent installation..."
+            # Flag /S juga berfungsi untuk installer Notepad++
+            Start-Process -FilePath $notepadInstaller -ArgumentList "/S" -Wait
+            echo "Notepad++ installation complete."
+          } else {
+            echo "Notepad++ installer not found. Skipping."
+          }
+          
+          # --- Tambahkan aplikasi lain di sini dengan menyalin blok di atas ---
+          echo "--- Automatic Installation Finished ---"
 
       - name: Configure Core RDP & User
         run: |
@@ -69,14 +96,14 @@ jobs:
           Write-Host "Address: $env:TAILSCALE_IP"
           Write-Host "Username: dhasap"
           Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "Persistent Folder: C:\Users\runneradmin\Desktop\persist"
+          Write-Host "Persistent Folder: C:\persist"
           Write-Host "==================`n"
           while ($true) { Start-Sleep -Seconds 300 }
 
       - name: Backup Persistent Data to Cloud
         if: always() # Selalu jalankan langkah ini
         run: |
-          echo "Backing up data to cloud..."
-          # Menggunakan 'sync' untuk efisiensi, hanya mengunggah file yang berubah
-          rclone sync C:\Users\runneradmin\Desktop\persist gdrive:/RDP_Backup --progress
+          echo "Backing up persistent data and apps to cloud..."
+          # Menggunakan sync untuk efisiensi, hanya mengunggah file yang berubah
+          rclone sync C:\persist gdrive:/RDP_Backup --progress
 
