@@ -40,8 +40,7 @@ jobs:
           echo "--- Starting Safe Restore ---"
           $userPath = "C:\Users\runneradmin"
           
-          # PERBAIKAN: Restore folder-folder penting satu per satu, hindari sync seluruh AppData.
-          # Kita menggunakan 'copy' untuk keamanan tambahan.
+          # Restore folder-folder penting satu per satu.
           echo "Restoring Desktop, Documents, Downloads, Pictures, Videos..."
           rclone copy gdrive:/RDP_Backup/UserData/Desktop "$userPath\Desktop" --progress --create-empty-src-dirs
           rclone copy gdrive:/RDP_Backup/UserData/Documents "$userPath\Documents" --progress --create-empty-src-dirs
@@ -49,15 +48,17 @@ jobs:
           rclone copy gdrive:/RDP_Backup/UserData/Pictures "$userPath\Pictures" --progress --create-empty-src-dirs
           rclone copy gdrive:/RDP_Backup/UserData/Videos "$userPath\Videos" --progress --create-empty-src-dirs
           
-          # Hanya restore AppData\Roaming, yang berisi konfigurasi dan lebih aman.
+          # Hanya restore AppData\Roaming.
           echo "Restoring AppData\Roaming for application settings..."
           rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
 
-          # Restore dan impor registry
-          echo "Restoring and importing registry..."
-          rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$userPath\HKCU.reg" -P
-          if (Test-Path "$userPath\HKCU.reg") {
-            reg import "$userPath\HKCU.reg"
+          # PERBAIKAN: Restore registry ke Desktop, lalu impor dari sana.
+          echo "Restoring registry to Desktop..."
+          $regFile = "$userPath\Desktop\HKCU_restore.reg"
+          rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
+          if (Test-Path $regFile) {
+            echo "Importing registry from Desktop..."
+            reg import $regFile
           }
           echo "--- Restore Complete ---"
 
@@ -102,9 +103,9 @@ jobs:
           echo "--- Starting Optimized Backup ---"
           $userPath = "C:\Users\runneradmin"
           
-          # Ekspor registry terlebih dahulu
-          echo "Exporting registry..."
-          reg export HKCU "$userPath\HKCU.reg" /y
+          # PERBAIKAN: Ekspor registry ke Desktop. Perintah sync di bawah akan otomatis mencadangkannya.
+          echo "Exporting registry to Desktop..."
+          reg export HKCU "$userPath\Desktop\HKCU.reg" /y
           
           # Backup seluruh profil pengguna dengan mengecualikan cache dan file sementara
           echo "Backing up User Profile with exclusions..."
@@ -117,9 +118,9 @@ jobs:
             --exclude "Downloads/**.tmp" `
             --exclude "NTUSER.DAT*"
 
-          # Backup file registry secara terpisah
-          echo "Backing up registry file..."
-          rclone copy "$userPath\HKCU.reg" gdrive:/RDP_Backup/registry -P
+          # TIDAK PERLU LAGI: Perintah sync di atas sudah mencakup file .reg di Desktop.
+          # echo "Backing up registry file..."
+          # rclone copy "$userPath\HKCU.reg" gdrive:/RDP_Backup/registry -P
           
           echo "--- Backup Complete ---"
 
