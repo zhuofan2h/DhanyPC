@@ -52,7 +52,7 @@ jobs:
           echo "Restoring AppData\Roaming for application settings..."
           rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
 
-          # PERBAIKAN: Restore registry ke Desktop, lalu impor dari sana.
+          # Restore registry ke Desktop, lalu impor dari sana.
           echo "Restoring registry to Desktop..."
           $regFile = "$userPath\Desktop\HKCU_restore.reg"
           rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
@@ -96,31 +96,29 @@ jobs:
           # Tahan koneksi
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: 6. Backup User Profile & Registry to Cloud (Always Runs)
+      - name: 6. Backup User Profile & Registry to Cloud (STABLE METHOD)
         if: always()
         shell: powershell
         run: |
-          echo "--- Starting Optimized Backup ---"
+          echo "--- Starting Stable Backup ---"
           $userPath = "C:\Users\runneradmin"
           
-          # PERBAIKAN: Ekspor registry ke Desktop. Perintah sync di bawah akan otomatis mencadangkannya.
+          # Ekspor registry ke Desktop terlebih dahulu.
           echo "Exporting registry to Desktop..."
           reg export HKCU "$userPath\Desktop\HKCU.reg" /y
           
-          # Backup seluruh profil pengguna dengan mengecualikan cache dan file sementara
-          echo "Backing up User Profile with exclusions..."
-          rclone sync $userPath gdrive:/RDP_Backup/UserData --progress --transfers 8 --checkers 16 `
-            --exclude "AppData/Local/Temp/**" `
-            --exclude "AppData/LocalLow/Temp/**" `
-            --exclude "AppData/Local/Google/Chrome/User Data/Default/Cache/**" `
-            --exclude "AppData/Local/Microsoft/Edge/User Data/Default/Cache/**" `
-            --exclude "AppData/Local/Microsoft/Windows/INetCache/**" `
-            --exclude "Downloads/**.tmp" `
-            --exclude "NTUSER.DAT*"
-
-          # TIDAK PERLU LAGI: Perintah sync di atas sudah mencakup file .reg di Desktop.
-          # echo "Backing up registry file..."
-          # rclone copy "$userPath\HKCU.reg" gdrive:/RDP_Backup/registry -P
+          # PERBAIKAN: Backup folder penting satu per satu untuk menghindari file yang terkunci.
+          # Menggunakan 'sync' agar remote menjadi mirror dari state lokal.
+          echo "Backing up user folders (Desktop, Documents, etc.)..."
+          rclone sync "$userPath\Desktop" gdrive:/RDP_Backup/UserData/Desktop --progress
+          rclone sync "$userPath\Documents" gdrive:/RDP_Backup/UserData/Documents --progress
+          rclone sync "$userPath\Downloads" gdrive:/RDP_Backup/UserData/Downloads --progress
+          rclone sync "$userPath\Pictures" gdrive:/RDP_Backup/UserData/Pictures --progress
+          rclone sync "$userPath\Videos" gdrive:/RDP_Backup/UserData/Videos --progress
+          
+          # Tetap backup AppData\Roaming karena berisi konfigurasi penting.
+          echo "Backing up AppData\Roaming..."
+          rclone sync "$userPath\AppData\Roaming" gdrive:/RDP_Backup/UserData/AppData/Roaming --progress
           
           echo "--- Backup Complete ---"
 
