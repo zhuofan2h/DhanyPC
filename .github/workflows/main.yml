@@ -1,109 +1,130 @@
-name: RDP with Persistent Storage & Apps
+# Nama: RDP dengan State/Data Persisten Penuh
+# Dibuat berdasarkan rencana detail pengguna.
+# Fitur: Restore data, registry, auto-install apps, lalu full backup saat shutdown.
+name: RDP Full State Persistence
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  persistent-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Checkout Repository
+      - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup rclone and Load Config
+      - name: 2. Install rclone
         shell: powershell
         run: |
-          echo "Installing rclone..."
-          choco install rclone -y
+          echo "Installing Chocolatey and rclone..."
+          Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+          choco install rclone -y -f
+          echo "rclone installed."
+
+      - name: 3. Setup rclone Config from Secret
+        shell: powershell
+        run: |
           echo "Creating rclone config directory..."
           $configPath = "C:\Users\runneradmin\.config\rclone"
           New-Item -ItemType Directory -Force -Path $configPath
-          echo "Writing rclone config from secret using here-string..."
+          echo "Writing rclone.conf using PowerShell here-string..."
+          # Menggunakan Set-Content dengan here-string untuk menjaga format multiline
           Set-Content -Path "$configPath\rclone.conf" -Value @"
           ${{ secrets.RCLONE_CONF }}
           "@
-          echo "rclone setup complete."
-          rclone config show
+          echo "rclone.conf successfully written."
+          rclone version
 
-      - name: Restore Persistent Data from Cloud
+      - name: 4. Restore Data & Apps from Cloud
         shell: powershell
         run: |
           $persistPath = "C:\persist"
           echo "Creating persistent directory: $persistPath"
           New-Item -ItemType Directory -Force -Path $persistPath
-          echo "Restoring data and apps from cloud..."
-          # Menggunakan sync agar file yang dihapus di Drive juga ikut terhapus di runner
-          rclone sync gdrive:/RDP_Backup $persistPath --progress
+          echo "Restoring data from Google Drive..."
+          # Menggunakan 'copy' saat restore agar lebih aman (tidak menghapus file di remote)
+          rclone copy gdrive:/RDP_Backup $persistPath --progress --create-empty-src-dirs --transfers 8 --checkers 16
 
-      - name: Install Persisted Applications
+      - name: 5. Restore System State (Registry & Auto-Install)
         shell: powershell
         run: |
-          echo "--- Starting Automatic Installation ---"
+          # --- Restore Registry ---
+          $hkcuReg = "C:\persist\registry\HKCU.reg"
+          if (Test-Path $hkcuReg) {
+            echo "HKCU.reg found. Importing registry settings..."
+            reg import $hkcuReg
+          } else {
+            echo "HKCU registry backup not found. Skipping."
+          }
 
-          # --- Instalasi WinRAR ---
-          $winrarInstaller = "C:\persist\winrar-7-13-0.exe" # Ganti nama file jika perlu
+          # --- Auto-Install Applications ---
+          $winrarInstaller = "C:\persist\installers\winrar-x64.exe" # Pastikan nama file ini ada di Drive
           if (Test-Path $winrarInstaller) {
-            echo "WinRAR installer found. Starting silent installation..."
-            Start-Process -FilePath $winrarInstaller -ArgumentList "/S" -Wait
-            echo "WinRAR installation complete."
-          } else {
-            echo "WinRAR installer not found. Skipping."
+            # Cek apakah WinRAR sudah terinstal atau belum
+            if (-not (Test-Path "C:\Program Files\WinRAR\WinRAR.exe")) {
+              echo "WinRAR installer found and not yet installed. Starting silent installation..."
+              Start-Process -FilePath $winrarInstaller -ArgumentList "/S" -Wait
+              echo "WinRAR installation complete."
+            } else {
+              echo "WinRAR is already installed. Skipping."
+            }
           }
 
-          # --- CONTOH: Instalasi Notepad++ ---
-          $notepadInstaller = "C:\persist\npp.installer.x64.exe" # Ganti nama file jika perlu
-          if (Test-Path $notepadInstaller) {
-            echo "Notepad++ installer found. Starting silent installation..."
-            # Flag /S juga berfungsi untuk installer Notepad++
-            Start-Process -FilePath $notepadInstaller -ArgumentList "/S" -Wait
-            echo "Notepad++ installation complete."
-          } else {
-            echo "Notepad++ installer not found. Skipping."
-          }
-          
-          # --- Tambahkan aplikasi lain di sini dengan menyalin blok di atas ---
-          echo "--- Automatic Installation Finished ---"
-
-      - name: Configure Core RDP & User
+      - name: 6. Configure RDP & Connect Tailscale
+        shell: powershell
         run: |
+          # --- Configure RDP User ---
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           netsh advfirewall firewall add rule name="Allow RDP" dir=in action=allow protocol=TCP localport=3389
           New-LocalUser -Name "dhasap" -Password (ConvertTo-SecureString "User123" -AsPlainText -Force) -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "dhasap"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "dhasap"
-          echo "RDP_PASSWORD=User123" >> $env:GITHUB_ENV
-
-      - name: Install and Connect Tailscale
-        run: |
+          $env:RDP_PASSWORD="User123"
+          
+          # --- Install and Connect Tailscale ---
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
           Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/quiet" -Wait
           $env:Path += ";C:\Program Files\Tailscale"
-          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$($env:GITHUB_RUN_ID)
           
           $tsIP = $null; $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = tailscale ip -4
-              Start-Sleep -Seconds 5; $retries++
+          while (-not $tsIP -and $retries -lt 12) {
+            $tsIP = tailscale ip -4
+            Start-Sleep -Seconds 5; $retries++
           }
-          if (-not $tsIP) { Write-Error "Tailscale IP not assigned."; exit 1 }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
-      - name: Start RDP Session & Maintain Connection
-        run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
+          if (-not $tsIP) { throw "Tailscale IP not assigned." }
+          $env:TAILSCALE_IP=$tsIP
+          
+          # --- Display Connection Info ---
+          Write-Host "`n=== RDP ACCESS READY ===" -ForegroundColor Green
+          Write-Host "Address: $tsIP"
           Write-Host "Username: dhasap"
           Write-Host "Password: $env:RDP_PASSWORD"
           Write-Host "Persistent Folder: C:\persist"
-          Write-Host "==================`n"
+          Write-Host "========================`n"
+          
+          # --- Maintain Connection ---
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: Backup Persistent Data to Cloud
-        if: always() # Selalu jalankan langkah ini
+      - name: 7. Backup State to Cloud (Always Runs)
+        # if: always() memastikan langkah ini selalu berjalan, bahkan jika RDP gagal atau dibatalkan
+        if: always()
+        shell: powershell
         run: |
-          echo "Backing up persistent data and apps to cloud..."
-          # Menggunakan sync untuk efisiensi, hanya mengunggah file yang berubah
-          rclone sync C:\persist gdrive:/RDP_Backup --progress
+          $persistPath = "C:\persist"
+          echo "--- Starting Shutdown Backup ---"
+          
+          # --- Export Registry ---
+          $regPath = "$persistPath\registry"
+          New-Item -ItemType Directory -Force -Path $regPath
+          echo "Exporting HKCU registry to $regPath\HKCU.reg"
+          reg export HKCU "$regPath\HKCU.reg" /y
+          
+          # --- Sync All Persistent Data to Cloud ---
+          echo "Backing up persistent data and apps to Google Drive..."
+          # Menggunakan 'sync' agar remote menjadi mirror dari state lokal terakhir
+          rclone sync $persistPath gdrive:/RDP_Backup --progress --transfers 8 --checkers 16
+          echo "--- Backup Complete ---"
 
