@@ -52,7 +52,7 @@ jobs:
           echo "Restoring AppData\Roaming for application settings..."
           rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
 
-          # PERBAIKAN FINAL: Hanya unduh file registry ke Desktop, JANGAN impor otomatis.
+          # Hanya unduh file registry ke Desktop, JANGAN impor otomatis.
           echo "Restoring registry file to Desktop for manual import..."
           $regFile = "$userPath\Desktop\HKCU_restore.reg"
           rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
@@ -90,7 +90,8 @@ jobs:
           Write-Host "Password: $env:RDP_PASSWORD"
           # Menambahkan instruksi manual untuk pengguna
           Write-Host "PENTING: Setelah login, klik kanan file 'HKCU_restore.reg' di Desktop dan pilih 'Merge'."
-          Write-Host "=================================================================================="`n"
+          # PERBAIKAN: Karakter `n (newline) dipindahkan ke dalam string.
+          Write-Host "==================================================================================`n"
           
           # Tahan koneksi
           while ($true) { Start-Sleep -Seconds 300 }
