@@ -1,7 +1,7 @@
-# Nama: RDP dengan State/Data Persisten Penuh
-# Dibuat berdasarkan rencana detail pengguna.
-# Fitur: Restore data, registry, auto-install apps, lalu full backup saat shutdown.
-name: RDP Full State Persistence
+# Nama: RDP dengan Backup State Profil & Sistem Penuh
+# Dibuat berdasarkan rencana pengguna untuk mencadangkan folder sistem dan profil pengguna.
+# PERINGATAN: Proses ini akan memakan waktu lama dan berisiko karena ukuran folder yang besar dan potensi file terkunci.
+name: RDP Full Profile & System Backup
 
 on:
   workflow_dispatch:
@@ -30,52 +30,43 @@ jobs:
           $configPath = "C:\Users\runneradmin\.config\rclone"
           New-Item -ItemType Directory -Force -Path $configPath
           echo "Writing rclone.conf using PowerShell here-string..."
-          # Menggunakan Set-Content dengan here-string untuk menjaga format multiline
           Set-Content -Path "$configPath\rclone.conf" -Value @"
           ${{ secrets.RCLONE_CONF }}
           "@
           echo "rclone.conf successfully written."
-          rclone version
 
-      - name: 4. Restore Data & Apps from Cloud
+      - name: 4. Restore Full User & System State from Cloud
         shell: powershell
         run: |
-          $persistPath = "C:\persist"
-          echo "Creating persistent directory: $persistPath"
-          New-Item -ItemType Directory -Force -Path $persistPath
-          echo "Restoring data from Google Drive..."
-          # Menggunakan 'copy' saat restore agar lebih aman (tidak menghapus file di remote)
-          rclone copy gdrive:/RDP_Backup $persistPath --progress --create-empty-src-dirs --transfers 8 --checkers 16
+          echo "--- Starting Full State Restore ---"
+          $userPath = "C:\Users\runneradmin"
+          
+          # Restore folder sistem dan aplikasi
+          echo "Restoring Program Files, Program Files (x86), and AppData..."
+          rclone copy gdrive:/RDP_Backup/ProgramFiles "C:\Program Files" --progress --transfers 8 --checkers 16
+          rclone copy gdrive:/RDP_Backup/ProgramFilesx86 "C:\Program Files (x86)" --progress --transfers 8 --checkers 16
+          rclone copy gdrive:/RDP_Backup/AppData "$userPath\AppData" --progress --transfers 8 --checkers 16
 
-      - name: 5. Restore System State (Registry & Auto-Install)
-        shell: powershell
-        run: |
-          # --- Restore Registry ---
-          $hkcuReg = "C:\persist\registry\HKCU.reg"
-          if (Test-Path $hkcuReg) {
-            echo "HKCU.reg found. Importing registry settings..."
-            reg import $hkcuReg
-          } else {
-            echo "HKCU registry backup not found. Skipping."
+          # Restore folder profil pengguna
+          echo "Restoring Desktop, Documents, Downloads, Pictures, and Videos..."
+          rclone copy gdrive:/RDP_Backup/Desktop "$userPath\Desktop" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/Documents "$userPath\Documents" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/Downloads "$userPath\Downloads" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/Pictures "$userPath\Pictures" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/Videos "$userPath\Videos" --progress --create-empty-src-dirs
+
+          # Restore dan impor registry
+          echo "Restoring and importing registry..."
+          rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$userPath\HKCU.reg" -P
+          if (Test-Path "$userPath\HKCU.reg") {
+            reg import "$userPath\HKCU.reg"
           }
+          echo "--- Restore Complete ---"
 
-          # --- Auto-Install Applications ---
-          $winrarInstaller = "C:\persist\installers\winrar-x64.exe" # Pastikan nama file ini ada di Drive
-          if (Test-Path $winrarInstaller) {
-            # Cek apakah WinRAR sudah terinstal atau belum
-            if (-not (Test-Path "C:\Program Files\WinRAR\WinRAR.exe")) {
-              echo "WinRAR installer found and not yet installed. Starting silent installation..."
-              Start-Process -FilePath $winrarInstaller -ArgumentList "/S" -Wait
-              echo "WinRAR installation complete."
-            } else {
-              echo "WinRAR is already installed. Skipping."
-            }
-          }
-
-      - name: 6. Configure RDP & Connect Tailscale
+      - name: 5. Configure RDP & Connect Tailscale
         shell: powershell
         run: |
-          # --- Configure RDP User ---
+          # Konfigurasi pengguna RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           netsh advfirewall firewall add rule name="Allow RDP" dir=in action=allow protocol=TCP localport=3389
           New-LocalUser -Name "dhasap" -Password (ConvertTo-SecureString "User123" -AsPlainText -Force) -AccountNeverExpires
@@ -83,7 +74,7 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "dhasap"
           $env:RDP_PASSWORD="User123"
           
-          # --- Install and Connect Tailscale ---
+          # Install dan hubungkan Tailscale
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
           Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/quiet" -Wait
           $env:Path += ";C:\Program Files\Tailscale"
@@ -95,36 +86,42 @@ jobs:
             Start-Sleep -Seconds 5; $retries++
           }
           if (-not $tsIP) { throw "Tailscale IP not assigned." }
-          $env:TAILSCALE_IP=$tsIP
           
-          # --- Display Connection Info ---
+          # Tampilkan info koneksi
           Write-Host "`n=== RDP ACCESS READY ===" -ForegroundColor Green
           Write-Host "Address: $tsIP"
           Write-Host "Username: dhasap"
           Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "Persistent Folder: C:\persist"
           Write-Host "========================`n"
           
-          # --- Maintain Connection ---
+          # Tahan koneksi
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: 7. Backup State to Cloud (Always Runs)
-        # if: always() memastikan langkah ini selalu berjalan, bahkan jika RDP gagal atau dibatalkan
+      - name: 6. Backup Full User & System State to Cloud (Always Runs)
         if: always()
         shell: powershell
         run: |
-          $persistPath = "C:\persist"
-          echo "--- Starting Shutdown Backup ---"
+          echo "--- Starting Full State Backup ---"
+          $userPath = "C:\Users\runneradmin"
           
-          # --- Export Registry ---
-          $regPath = "$persistPath\registry"
-          New-Item -ItemType Directory -Force -Path $regPath
-          echo "Exporting HKCU registry to $regPath\HKCU.reg"
-          reg export HKCU "$regPath\HKCU.reg" /y
+          # Backup folder sistem dan aplikasi
+          echo "Backing up Program Files, Program Files (x86), and AppData..."
+          rclone copy "C:\Program Files" gdrive:/RDP_Backup/ProgramFiles --progress --transfers 8 --checkers 16
+          rclone copy "C:\Program Files (x86)" gdrive:/RDP_Backup/ProgramFilesx86 --progress --transfers 8 --checkers 16
+          rclone copy "$userPath\AppData" gdrive:/RDP_Backup/AppData --progress --transfers 8 --checkers 16
+
+          # Backup folder profil pengguna
+          echo "Backing up Desktop, Documents, Downloads, Pictures, and Videos..."
+          rclone copy "$userPath\Desktop" gdrive:/RDP_Backup/Desktop -P
+          rclone copy "$userPath\Documents" gdrive:/RDP_Backup/Documents -P
+          rclone copy "$userPath\Downloads" gdrive:/RDP_Backup/Downloads -P
+          rclone copy "$userPath\Pictures" gdrive:/RDP_Backup/Pictures -P
+          rclone copy "$userPath\Videos" gdrive:/RDP_Backup/Videos -P
+
+          # Ekspor dan backup registry
+          echo "Exporting and backing up registry..."
+          reg export HKCU "$userPath\HKCU.reg" /y
+          rclone copy "$userPath\HKCU.reg" gdrive:/RDP_Backup/registry -P
           
-          # --- Sync All Persistent Data to Cloud ---
-          echo "Backing up persistent data and apps to Google Drive..."
-          # Menggunakan 'sync' agar remote menjadi mirror dari state lokal terakhir
-          rclone sync $persistPath gdrive:/RDP_Backup --progress --transfers 8 --checkers 16
           echo "--- Backup Complete ---"
 
