@@ -1,7 +1,7 @@
 # Nama: RDP dengan Backup State Profil & Sistem Penuh
 # Dibuat berdasarkan rencana pengguna untuk mencadangkan folder sistem dan profil pengguna.
 # PERINGATAN: Proses ini akan memakan waktu lama dan berisiko karena ukuran folder yang besar dan potensi file terkunci.
-name: RDP Full Profile & System Backup
+name: RDP
 
 on:
   workflow_dispatch:
