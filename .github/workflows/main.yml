@@ -57,6 +57,9 @@ jobs:
           $regFile = "$userPath\Desktop\HKCU_restore.reg"
           rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
           if (Test-Path $regFile) {
+            # PERBAIKAN: Beri jeda 3 detik agar file siap dibaca oleh sistem.
+            echo "Waiting for file system to sync..."
+            Start-Sleep -Seconds 3
             echo "Importing registry from Desktop..."
             reg import $regFile
           }
@@ -107,7 +110,7 @@ jobs:
           echo "Exporting registry to Desktop..."
           reg export HKCU "$userPath\Desktop\HKCU.reg" /y
           
-          # PERBAIKAN: Backup folder penting satu per satu untuk menghindari file yang terkunci.
+          # Backup folder penting satu per satu untuk menghindari file yang terkunci.
           # Menggunakan 'sync' agar remote menjadi mirror dari state lokal.
           echo "Backing up user folders (Desktop, Documents, etc.)..."
           rclone sync "$userPath\Desktop" gdrive:/RDP_Backup/UserData/Desktop --progress
