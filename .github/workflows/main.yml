@@ -1,6 +1,6 @@
 # Nama: RDP dengan Backup Profil Pengguna yang Dioptimalkan
 # Versi ini jauh lebih cepat dengan fokus pada folder pengguna dan mengecualikan cache.
-name: RDP Optimized User Profile Backup
+name: RDP
 
 on:
   workflow_dispatch:
