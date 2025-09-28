@@ -34,7 +34,7 @@ jobs:
           "@
           echo "rclone.conf successfully written."
 
-      - name: 4. Restore User Profile & Registry from Cloud (SAFE METHOD)
+      - name: 4. Restore User Profile & Registry File from Cloud
         shell: powershell
         run: |
           echo "--- Starting Safe Restore ---"
@@ -52,17 +52,11 @@ jobs:
           echo "Restoring AppData\Roaming for application settings..."
           rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
 
-          # Restore registry ke Desktop, lalu impor dari sana.
-          echo "Restoring registry to Desktop..."
+          # PERBAIKAN FINAL: Hanya unduh file registry ke Desktop, JANGAN impor otomatis.
+          echo "Restoring registry file to Desktop for manual import..."
           $regFile = "$userPath\Desktop\HKCU_restore.reg"
           rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
-          if (Test-Path $regFile) {
-            # PERBAIKAN: Beri jeda 3 detik agar file siap dibaca oleh sistem.
-            echo "Waiting for file system to sync..."
-            Start-Sleep -Seconds 3
-            echo "Importing registry from Desktop..."
-            reg import $regFile
-          }
+          
           echo "--- Restore Complete ---"
 
       - name: 5. Configure RDP & Connect Tailscale
@@ -94,7 +88,9 @@ jobs:
           Write-Host "Address: $tsIP"
           Write-Host "Username: dhasap"
           Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "========================`n"
+          # Menambahkan instruksi manual untuk pengguna
+          Write-Host "PENTING: Setelah login, klik kanan file 'HKCU_restore.reg' di Desktop dan pilih 'Merge'."
+          Write-Host "=================================================================================="`n"
           
           # Tahan koneksi
           while ($true) { Start-Sleep -Seconds 300 }
@@ -111,7 +107,6 @@ jobs:
           reg export HKCU "$userPath\Desktop\HKCU.reg" /y
           
           # Backup folder penting satu per satu untuk menghindari file yang terkunci.
-          # Menggunakan 'sync' agar remote menjadi mirror dari state lokal.
           echo "Backing up user folders (Desktop, Documents, etc.)..."
           rclone sync "$userPath\Desktop" gdrive:/RDP_Backup/UserData/Desktop --progress
           rclone sync "$userPath\Documents" gdrive:/RDP_Backup/UserData/Documents --progress
