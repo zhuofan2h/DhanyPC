@@ -34,15 +34,24 @@ jobs:
           "@
           echo "rclone.conf successfully written."
 
-      - name: 4. Restore User Profile & Registry from Cloud
+      - name: 4. Restore User Profile & Registry from Cloud (SAFE METHOD)
         shell: powershell
         run: |
-          echo "--- Starting Optimized Restore ---"
+          echo "--- Starting Safe Restore ---"
           $userPath = "C:\Users\runneradmin"
           
-          # Restore seluruh profil pengguna dalam satu perintah
-          echo "Restoring User Profile (Desktop, Documents, AppData, etc.)..."
-          rclone sync gdrive:/RDP_Backup/UserData $userPath --progress --transfers 8 --checkers 16
+          # PERBAIKAN: Restore folder-folder penting satu per satu, hindari sync seluruh AppData.
+          # Kita menggunakan 'copy' untuk keamanan tambahan.
+          echo "Restoring Desktop, Documents, Downloads, Pictures, Videos..."
+          rclone copy gdrive:/RDP_Backup/UserData/Desktop "$userPath\Desktop" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/UserData/Documents "$userPath\Documents" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/UserData/Downloads "$userPath\Downloads" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/UserData/Pictures "$userPath\Pictures" --progress --create-empty-src-dirs
+          rclone copy gdrive:/RDP_Backup/UserData/Videos "$userPath\Videos" --progress --create-empty-src-dirs
+          
+          # Hanya restore AppData\Roaming, yang berisi konfigurasi dan lebih aman.
+          echo "Restoring AppData\Roaming for application settings..."
+          rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
 
           # Restore dan impor registry
           echo "Restoring and importing registry..."
