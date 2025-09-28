@@ -1,7 +1,6 @@
-# Nama: RDP dengan Backup State Profil & Sistem Penuh
-# Dibuat berdasarkan rencana pengguna untuk mencadangkan folder sistem dan profil pengguna.
-# PERINGATAN: Proses ini akan memakan waktu lama dan berisiko karena ukuran folder yang besar dan potensi file terkunci.
-name: RDP
+# Nama: RDP dengan Backup Profil Pengguna yang Dioptimalkan
+# Versi ini jauh lebih cepat dengan fokus pada folder pengguna dan mengecualikan cache.
+name: RDP Optimized User Profile Backup
 
 on:
   workflow_dispatch:
@@ -35,25 +34,15 @@ jobs:
           "@
           echo "rclone.conf successfully written."
 
-      - name: 4. Restore Full User & System State from Cloud
+      - name: 4. Restore User Profile & Registry from Cloud
         shell: powershell
         run: |
-          echo "--- Starting Full State Restore ---"
+          echo "--- Starting Optimized Restore ---"
           $userPath = "C:\Users\runneradmin"
           
-          # Restore folder sistem dan aplikasi
-          echo "Restoring Program Files, Program Files (x86), and AppData..."
-          rclone copy gdrive:/RDP_Backup/ProgramFiles "C:\Program Files" --progress --transfers 8 --checkers 16
-          rclone copy gdrive:/RDP_Backup/ProgramFilesx86 "C:\Program Files (x86)" --progress --transfers 8 --checkers 16
-          rclone copy gdrive:/RDP_Backup/AppData "$userPath\AppData" --progress --transfers 8 --checkers 16
-
-          # Restore folder profil pengguna
-          echo "Restoring Desktop, Documents, Downloads, Pictures, and Videos..."
-          rclone copy gdrive:/RDP_Backup/Desktop "$userPath\Desktop" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/Documents "$userPath\Documents" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/Downloads "$userPath\Downloads" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/Pictures "$userPath\Pictures" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/Videos "$userPath\Videos" --progress --create-empty-src-dirs
+          # Restore seluruh profil pengguna dalam satu perintah
+          echo "Restoring User Profile (Desktop, Documents, AppData, etc.)..."
+          rclone sync gdrive:/RDP_Backup/UserData $userPath --progress --transfers 8 --checkers 16
 
           # Restore dan impor registry
           echo "Restoring and importing registry..."
@@ -97,30 +86,30 @@ jobs:
           # Tahan koneksi
           while ($true) { Start-Sleep -Seconds 300 }
 
-      - name: 6. Backup Full User & System State to Cloud (Always Runs)
+      - name: 6. Backup User Profile & Registry to Cloud (Always Runs)
         if: always()
         shell: powershell
         run: |
-          echo "--- Starting Full State Backup ---"
+          echo "--- Starting Optimized Backup ---"
           $userPath = "C:\Users\runneradmin"
           
-          # Backup folder sistem dan aplikasi
-          echo "Backing up Program Files, Program Files (x86), and AppData..."
-          rclone copy "C:\Program Files" gdrive:/RDP_Backup/ProgramFiles --progress --transfers 8 --checkers 16
-          rclone copy "C:\Program Files (x86)" gdrive:/RDP_Backup/ProgramFilesx86 --progress --transfers 8 --checkers 16
-          rclone copy "$userPath\AppData" gdrive:/RDP_Backup/AppData --progress --transfers 8 --checkers 16
-
-          # Backup folder profil pengguna
-          echo "Backing up Desktop, Documents, Downloads, Pictures, and Videos..."
-          rclone copy "$userPath\Desktop" gdrive:/RDP_Backup/Desktop -P
-          rclone copy "$userPath\Documents" gdrive:/RDP_Backup/Documents -P
-          rclone copy "$userPath\Downloads" gdrive:/RDP_Backup/Downloads -P
-          rclone copy "$userPath\Pictures" gdrive:/RDP_Backup/Pictures -P
-          rclone copy "$userPath\Videos" gdrive:/RDP_Backup/Videos -P
-
-          # Ekspor dan backup registry
-          echo "Exporting and backing up registry..."
+          # Ekspor registry terlebih dahulu
+          echo "Exporting registry..."
           reg export HKCU "$userPath\HKCU.reg" /y
+          
+          # Backup seluruh profil pengguna dengan mengecualikan cache dan file sementara
+          echo "Backing up User Profile with exclusions..."
+          rclone sync $userPath gdrive:/RDP_Backup/UserData --progress --transfers 8 --checkers 16 `
+            --exclude "AppData/Local/Temp/**" `
+            --exclude "AppData/LocalLow/Temp/**" `
+            --exclude "AppData/Local/Google/Chrome/User Data/Default/Cache/**" `
+            --exclude "AppData/Local/Microsoft/Edge/User Data/Default/Cache/**" `
+            --exclude "AppData/Local/Microsoft/Windows/INetCache/**" `
+            --exclude "Downloads/**.tmp" `
+            --exclude "NTUSER.DAT*"
+
+          # Backup file registry secara terpisah
+          echo "Backing up registry file..."
           rclone copy "$userPath\HKCU.reg" gdrive:/RDP_Backup/registry -P
           
           echo "--- Backup Complete ---"
