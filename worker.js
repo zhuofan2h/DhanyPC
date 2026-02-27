@@ -5,11 +5,12 @@
  *   Telegram mengirim update via webhook POST ke URL worker ini.
  *   Worker memproses perintah dan memanggil GitHub Actions API.
  *
- * Environment variables (set via wrangler secret / Cloudflare Dashboard):
- *   TELEGRAM_BOT_TOKEN  — token bot Telegram
- *   TELEGRAM_CHAT_ID    — chat ID yang diizinkan (string)
- *   GH_PAT_TOKEN        — GitHub PAT dengan scope actions:write
- *   GH_REPO             — "owner/repo" (contoh: "zhuofan2h/rdp")
+ * Secrets (set di Cloudflare Dashboard → Workers → Settings → Variables and Secrets):
+ *   BOT_TOKEN        — token bot Telegram (dari @BotFather)
+ *   CHAT_ID          — chat ID yang diizinkan (string angka)
+ *   GH_PAT_TOKEN     — GitHub PAT dengan permission actions: write
+ *   GH_REPO          — "owner/repo" (contoh: "zhuofan2h/rdp")
+ *   WEBHOOK_SECRET   — string rahasia bebas, dipakai saat set webhook di Telegram
  *
  * Perintah yang didukung:
  *   /start | /help  — tampilkan menu
@@ -18,15 +19,19 @@
  *   /stop           — hentikan sesi RDP aktif
  */
 
-const ALLOWED_UPDATES = ["message"];
-
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 export default {
   async fetch(request, env) {
-    // Hanya terima POST dari Telegram
+    // Hanya terima POST
     if (request.method !== "POST") {
       return new Response("OK", { status: 200 });
+    }
+
+    // Validasi WEBHOOK_SECRET via header X-Telegram-Bot-Api-Secret-Token
+    const incomingSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+    if (incomingSecret !== env.WEBHOOK_SECRET) {
+      return new Response("Unauthorized", { status: 401 });
     }
 
     let update;
@@ -45,7 +50,7 @@ export default {
     const text   = (msg.text || "").trim();
 
     // Tolak chat yang tidak diizinkan
-    if (chatId !== String(env.TELEGRAM_CHAT_ID)) {
+    if (chatId !== String(env.CHAT_ID)) {
       await sendMessage(env, chatId, "⛔ Akses ditolak.");
       return new Response("OK", { status: 200 });
     }
@@ -67,7 +72,7 @@ export default {
         await cmdStop(env, chatId);
         break;
       default:
-        await sendMessage(env, chatId, "❓ Perintah tidak dikenal\\. Gunakan /help untuk bantuan\\.");
+        await sendMessage(env, chatId, "❓ Perintah tidak dikenal. Gunakan /help untuk bantuan.");
     }
 
     return new Response("OK", { status: 200 });
@@ -78,41 +83,38 @@ export default {
 
 async function cmdHelp(env, chatId) {
   const text =
-    "*🖥️ Bot Kontrol RDP*\n\n" +
-    "/rdp \\— Mulai sesi RDP baru\n" +
-    "/status \\— Cek status sesi RDP\n" +
-    "/stop \\— Hentikan sesi RDP aktif\n" +
-    "/help \\— Tampilkan pesan ini";
-  await sendMessage(env, chatId, text, "MarkdownV2");
+    "🖥️ *Bot Kontrol RDP*\n\n" +
+    "/rdp — Mulai sesi RDP baru\n" +
+    "/status — Cek status sesi RDP\n" +
+    "/stop — Hentikan sesi RDP aktif\n" +
+    "/help — Tampilkan pesan ini";
+  await sendMessage(env, chatId, text);
 }
 
 async function cmdRdp(env, chatId) {
   const active = await getActiveRun(env);
   if (active) {
-    const rid    = active.id;
-    const status = active.status;
     await sendMessage(
       env, chatId,
-      `⚠️ Sudah ada sesi aktif\\.\n*Run ID:* \`${rid}\`\n*Status:* ${escMd(status)}\n\nGunakan /status untuk info lebih lanjut\\.`,
-      "MarkdownV2",
+      `⚠️ Sudah ada sesi aktif.\nRun ID: ${active.id}\nStatus: ${active.status}\n\nGunakan /status untuk info lebih lanjut.`,
     );
     return;
   }
 
-  await sendMessage(env, chatId, "🚀 Memulai sesi RDP baru\\.\\.\\. harap tunggu beberapa menit\\.", "MarkdownV2");
+  await sendMessage(env, chatId, "🚀 Memulai sesi RDP baru... harap tunggu beberapa menit.");
 
   const ok = await triggerRdp(env);
   if (ok) {
-    await sendMessage(env, chatId, "✅ Workflow RDP berhasil di\\-trigger\\! Anda akan mendapat notifikasi saat RDP siap\\.", "MarkdownV2");
+    await sendMessage(env, chatId, "✅ Workflow RDP berhasil di-trigger! Anda akan mendapat notifikasi saat RDP siap.");
   } else {
-    await sendMessage(env, chatId, "❌ Gagal memulai RDP\\. Periksa GitHub Actions atau coba lagi\\.", "MarkdownV2");
+    await sendMessage(env, chatId, "❌ Gagal memulai RDP. Periksa GitHub Actions atau coba lagi.");
   }
 }
 
 async function cmdStatus(env, chatId) {
   const runs = await getRuns(env, 5);
   if (!runs || runs.length === 0) {
-    await sendMessage(env, chatId, "ℹ️ Tidak ada riwayat run yang ditemukan\\.", "MarkdownV2");
+    await sendMessage(env, chatId, "ℹ️ Tidak ada riwayat run yang ditemukan.");
     return;
   }
 
@@ -128,32 +130,32 @@ async function cmdStatus(env, chatId) {
 
   const lines = ["*Status Sesi RDP Terbaru:*\n"];
   for (const run of runs) {
-    const st   = run.status || "unknown";
+    const st   = run.status   || "unknown";
     const conc = run.conclusion || "";
     const icon = STATUS_ICON[conc || st] || "⚫";
     const rid  = run.id;
     const time = (run.created_at || "").slice(0, 16).replace("T", " ");
-    lines.push(`${icon} \`${rid}\` \\| ${escMd(st)}/${escMd(conc || "\\-")} \\| ${escMd(time)}`);
+    lines.push(`${icon} \`${rid}\` | ${st}/${conc || "-"} | ${time}`);
   }
 
-  await sendMessage(env, chatId, lines.join("\n"), "MarkdownV2");
+  await sendMessage(env, chatId, lines.join("\n"));
 }
 
 async function cmdStop(env, chatId) {
   const active = await getActiveRun(env);
   if (!active) {
-    await sendMessage(env, chatId, "ℹ️ Tidak ada sesi RDP yang aktif saat ini\\.", "MarkdownV2");
+    await sendMessage(env, chatId, "ℹ️ Tidak ada sesi RDP yang aktif saat ini.");
     return;
   }
 
   const rid = active.id;
-  await sendMessage(env, chatId, `⏹️ Menghentikan sesi RDP \\(Run ID: \`${rid}\`\\)\\.\\.\\. `, "MarkdownV2");
+  await sendMessage(env, chatId, `⏹️ Menghentikan sesi RDP (Run ID: ${rid})...`);
 
   const ok = await cancelRun(env, rid);
   if (ok) {
-    await sendMessage(env, chatId, `✅ Sesi \`${rid}\` berhasil dihentikan\\.`, "MarkdownV2");
+    await sendMessage(env, chatId, `✅ Sesi ${rid} berhasil dihentikan.`);
   } else {
-    await sendMessage(env, chatId, `❌ Gagal menghentikan sesi \`${rid}\`\\. Batalkan manual di GitHub Actions\\.`, "MarkdownV2");
+    await sendMessage(env, chatId, `❌ Gagal menghentikan sesi ${rid}. Batalkan manual di GitHub Actions.`);
   }
 }
 
@@ -206,17 +208,10 @@ async function cancelRun(env, runId) {
 
 // ── Telegram API ─────────────────────────────────────────────────────────────
 
-async function sendMessage(env, chatId, text, parseMode = "MarkdownV2") {
-  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+async function sendMessage(env, chatId, text) {
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
   });
-}
-
-// ── Utility ──────────────────────────────────────────────────────────────────
-
-/** Escape karakter spesial MarkdownV2 */
-function escMd(str) {
-  return String(str).replace(/[_*[\]()~`>#+=|{}.!\\-]/g, "\\$&");
 }

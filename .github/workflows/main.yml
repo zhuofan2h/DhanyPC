@@ -37,8 +37,8 @@ jobs:
           if (-not $tsIP) { throw "Tailscale IP tidak berhasil didapat." }
 
           # ── Kirim notifikasi RDP siap ke Telegram ────────────────────────
-          $botToken  = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
-          $chatId    = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          $botToken  = "${{ secrets.BOT_TOKEN }}"
+          $chatId    = "${{ secrets.CHAT_ID }}"
           $runId     = $env:GITHUB_RUN_ID
           $startTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
           $endTime   = (Get-Date).AddMinutes(355).ToString("yyyy-MM-dd HH:mm:ss UTC")
@@ -86,8 +86,8 @@ jobs:
         if: always()
         shell: powershell
         run: |
-          $botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
-          $chatId   = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          $botToken = "${{ secrets.BOT_TOKEN }}"
+          $chatId   = "${{ secrets.CHAT_ID }}"
           $runId    = $env:GITHUB_RUN_ID
           $endTime  = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
 
