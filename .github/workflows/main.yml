@@ -15,6 +15,19 @@ jobs:
       - name: 2. Configure RDP & Connect Tailscale
         shell: powershell
         run: |
+          # ── Helper: kirim pesan Telegram ────────────────────────────────
+          function Send-Telegram {
+            param($Token, $ChatId, $Text)
+            try {
+              $payload = @{ chat_id = $ChatId; text = $Text } | ConvertTo-Json -Compress
+              $bytes   = [System.Text.Encoding]::UTF8.GetBytes($payload)
+              Invoke-RestMethod -Uri "https://api.telegram.org/bot$Token/sendMessage" `
+                -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
+            } catch {
+              Write-Warning "Gagal kirim Telegram: $_"
+            }
+          }
+
           # ── Validasi secrets wajib ───────────────────────────────────────
           $botToken = "${{ secrets.BOT_TOKEN }}"
           $chatId   = "${{ secrets.CHAT_ID }}"
@@ -51,7 +64,7 @@ jobs:
           # Tunggu Tailscale IP
           $tsIP = $null; $retries = 0
           while (-not $tsIP -and $retries -lt 12) {
-            $tsIP = tailscale ip -4 2>$null
+            $tsIP = (tailscale ip -4 2>$null | Out-String).Trim()
             if (-not $tsIP) { Start-Sleep -Seconds 5; $retries++ }
           }
           if (-not $tsIP) { throw "Tailscale IP tidak berhasil didapat setelah 60 detik. Periksa status Tailscale." }
@@ -61,13 +74,8 @@ jobs:
           $startTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
           $endTime   = (Get-Date).AddMinutes(355).ToString("yyyy-MM-dd HH:mm:ss UTC")
 
-          $msgReady  = "RDP SIAP`n`nAlamat  : $tsIP`nUsername: dhasap`nPassword: User123`n`nMulai   : $startTime`nBerakhir: $endTime`nRun ID  : $runId"
-          $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgReady -replace '"','\"' -replace "`n",'\n')))
-          try {
-            Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
-          } catch {
-            Write-Warning "Gagal kirim notifikasi Telegram: $_"
-          }
+          $msgReady = "RDP SIAP`n`nAlamat  : $tsIP`nUsername: dhasap`nPassword: User123`n`nMulai   : $startTime`nBerakhir: $endTime`nRun ID  : $runId"
+          Send-Telegram -Token $botToken -ChatId $chatId -Text $msgReady
 
           Write-Host "=== RDP ACCESS READY ===" -ForegroundColor Green
           Write-Host "Address : $tsIP"
@@ -97,12 +105,7 @@ jobs:
               Write-Host "[$timeNow] Sisa waktu: ${hours}j ${mins}m"
 
               $msgUpd = "Update Sesi RDP`n`nWaktu   : $timeNow UTC`nSisa    : $hours jam $mins menit`nRun ID  : $runId"
-              $bodyUpd = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgUpd -replace '"','\"' -replace "`n",'\n')))
-              try {
-                Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $bodyUpd
-              } catch {
-                Write-Warning "Gagal kirim update Telegram: $_"
-              }
+              Send-Telegram -Token $botToken -ChatId $chatId -Text $msgUpd
 
               $nextUpdate = (Get-Date).AddSeconds($interval)
             }
@@ -112,6 +115,18 @@ jobs:
         if: always()
         shell: powershell
         run: |
+          function Send-Telegram {
+            param($Token, $ChatId, $Text)
+            try {
+              $payload = @{ chat_id = $ChatId; text = $Text } | ConvertTo-Json -Compress
+              $bytes   = [System.Text.Encoding]::UTF8.GetBytes($payload)
+              Invoke-RestMethod -Uri "https://api.telegram.org/bot$Token/sendMessage" `
+                -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
+            } catch {
+              Write-Warning "Gagal kirim Telegram: $_"
+            }
+          }
+
           $botToken = "${{ secrets.BOT_TOKEN }}"
           $chatId   = "${{ secrets.CHAT_ID }}"
           $runId    = $env:GITHUB_RUN_ID
@@ -123,9 +138,4 @@ jobs:
           }
 
           $msgEnd = "SESI RDP BERAKHIR`n`nWaktu berakhir: $endTime`nRun ID        : $runId`n`nGunakan /rdp untuk memulai sesi baru."
-          $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgEnd -replace '"','\"' -replace "`n",'\n')))
-          try {
-            Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
-          } catch {
-            Write-Warning "Gagal kirim notifikasi akhir Telegram: $_"
-          }
+          Send-Telegram -Token $botToken -ChatId $chatId -Text $msgEnd
