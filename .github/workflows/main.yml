@@ -1,123 +1,96 @@
-# Nama: RDP dengan Backup Profil Pengguna yang Dioptimalkan
-# Versi ini jauh lebih cepat dengan fokus pada folder pengguna dan mengecualikan cache.
-name: RDP Optimized User Profile Backup
+name: RDP Session
 
 on:
   workflow_dispatch:
 
 jobs:
-  persistent-rdp:
+  rdp-session:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 360
 
     steps:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Install rclone
+      - name: 2. Configure RDP & Connect Tailscale
         shell: powershell
         run: |
-          echo "Installing Chocolatey and rclone..."
-          Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-          choco install rclone -y -f
-          echo "rclone installed."
-
-      - name: 3. Setup rclone Config from Secret
-        shell: powershell
-        run: |
-          echo "Creating rclone config directory..."
-          $configPath = "C:\Users\runneradmin\.config\rclone"
-          New-Item -ItemType Directory -Force -Path $configPath
-          echo "Writing rclone.conf using PowerShell here-string..."
-          Set-Content -Path "$configPath\rclone.conf" -Value @"
-          ${{ secrets.RCLONE_CONF }}
-          "@
-          echo "rclone.conf successfully written."
-
-      - name: 4. Restore User Profile & Registry File from Cloud
-        shell: powershell
-        run: |
-          echo "--- Starting Safe Restore ---"
-          $userPath = "C:\Users\runneradmin"
-          
-          # Restore folder-folder penting satu per satu.
-          echo "Restoring Desktop, Documents, Downloads, Pictures, Videos..."
-          rclone copy gdrive:/RDP_Backup/UserData/Desktop "$userPath\Desktop" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/UserData/Documents "$userPath\Documents" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/UserData/Downloads "$userPath\Downloads" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/UserData/Pictures "$userPath\Pictures" --progress --create-empty-src-dirs
-          rclone copy gdrive:/RDP_Backup/UserData/Videos "$userPath\Videos" --progress --create-empty-src-dirs
-          
-          # Hanya restore AppData\Roaming.
-          echo "Restoring AppData\Roaming for application settings..."
-          rclone copy gdrive:/RDP_Backup/UserData/AppData/Roaming "$userPath\AppData\Roaming" --progress --create-empty-src-dirs
-
-          # Hanya unduh file registry ke Desktop, JANGAN impor otomatis.
-          echo "Restoring registry file to Desktop for manual import..."
-          $regFile = "$userPath\Desktop\HKCU_restore.reg"
-          rclone copy gdrive:/RDP_Backup/registry/HKCU.reg "$regFile" -P
-          
-          echo "--- Restore Complete ---"
-
-      - name: 5. Configure RDP & Connect Tailscale
-        shell: powershell
-        run: |
-          # Konfigurasi pengguna RDP
+          # ── Konfigurasi RDP ──────────────────────────────────────────────
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           netsh advfirewall firewall add rule name="Allow RDP" dir=in action=allow protocol=TCP localport=3389
           New-LocalUser -Name "dhasap" -Password (ConvertTo-SecureString "User123" -AsPlainText -Force) -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "dhasap"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "dhasap"
-          $env:RDP_PASSWORD="User123"
-          
-          # Install dan hubungkan Tailscale
+
+          # ── Install & Hubungkan Tailscale ────────────────────────────────
           Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
           Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/quiet" -Wait
           $env:Path += ";C:\Program Files\Tailscale"
           tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$($env:GITHUB_RUN_ID)
-          
+
+          # Tunggu Tailscale IP
           $tsIP = $null; $retries = 0
           while (-not $tsIP -and $retries -lt 12) {
             $tsIP = tailscale ip -4
-            Start-Sleep -Seconds 5; $retries++
+            if (-not $tsIP) { Start-Sleep -Seconds 5; $retries++ }
           }
-          if (-not $tsIP) { throw "Tailscale IP not assigned." }
-          
-          # Tampilkan info koneksi
-          Write-Host "`n=== RDP ACCESS READY ===" -ForegroundColor Green
-          Write-Host "Address: $tsIP"
-          Write-Host "Username: dhasap"
-          Write-Host "Password: $env:RDP_PASSWORD"
-          # Menambahkan instruksi manual untuk pengguna
-          Write-Host "PENTING: Setelah login, klik kanan file 'HKCU_restore.reg' di Desktop dan pilih 'Merge'."
-          # PERBAIKAN: Karakter `n (newline) dipindahkan ke dalam string.
-          Write-Host "==================================================================================`n"
-          
-          # Tahan koneksi
-          while ($true) { Start-Sleep -Seconds 300 }
+          if (-not $tsIP) { throw "Tailscale IP tidak berhasil didapat." }
 
-      - name: 6. Backup User Profile & Registry to Cloud (STABLE METHOD)
+          # ── Kirim notifikasi RDP siap ke Telegram ────────────────────────
+          $botToken  = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          $chatId    = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          $runId     = $env:GITHUB_RUN_ID
+          $startTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
+          $endTime   = (Get-Date).AddMinutes(355).ToString("yyyy-MM-dd HH:mm:ss UTC")
+
+          $msgReady  = "RDP SIAP`n`nAlamat  : $tsIP`nUsername: dhasap`nPassword: User123`n`nMulai   : $startTime`nBerakhir: $endTime`nRun ID  : $runId"
+          $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgReady -replace '"','\"' -replace "`n",'\n')))
+          Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
+
+          Write-Host "=== RDP ACCESS READY ===" -ForegroundColor Green
+          Write-Host "Address : $tsIP"
+          Write-Host "Username: dhasap"
+          Write-Host "Password: User123"
+
+          # ── Loop monitor waktu ───────────────────────────────────────────
+          $loopStart  = Get-Date
+          $maxMinutes = 355
+          $interval   = 1800
+          $nextUpdate = (Get-Date).AddSeconds($interval)
+
+          while ($true) {
+            Start-Sleep -Seconds 60
+            $elapsed   = (Get-Date) - $loopStart
+            $remaining = $maxMinutes - [int]$elapsed.TotalMinutes
+
+            if ($remaining -le 0) {
+              Write-Host "Waktu sesi habis. Mengakhiri..." -ForegroundColor Yellow
+              break
+            }
+
+            if ((Get-Date) -ge $nextUpdate) {
+              $hours   = [math]::Floor($remaining / 60)
+              $mins    = $remaining % 60
+              $timeNow = Get-Date -Format "HH:mm:ss"
+              Write-Host "[$timeNow] Sisa waktu: ${hours}j ${mins}m"
+
+              $msgUpd = "Update Sesi RDP`n`nWaktu   : $timeNow UTC`nSisa    : $hours jam $mins menit`nRun ID  : $runId"
+              $bodyUpd = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgUpd -replace '"','\"' -replace "`n",'\n')))
+              Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $bodyUpd
+
+              $nextUpdate = (Get-Date).AddSeconds($interval)
+            }
+          }
+
+      - name: 3. Notifikasi Sesi Berakhir
         if: always()
         shell: powershell
         run: |
-          echo "--- Starting Stable Backup ---"
-          $userPath = "C:\Users\runneradmin"
-          
-          # Ekspor registry ke Desktop terlebih dahulu.
-          echo "Exporting registry to Desktop..."
-          reg export HKCU "$userPath\Desktop\HKCU.reg" /y
-          
-          # Backup folder penting satu per satu untuk menghindari file yang terkunci.
-          echo "Backing up user folders (Desktop, Documents, etc.)..."
-          rclone sync "$userPath\Desktop" gdrive:/RDP_Backup/UserData/Desktop --progress
-          rclone sync "$userPath\Documents" gdrive:/RDP_Backup/UserData/Documents --progress
-          rclone sync "$userPath\Downloads" gdrive:/RDP_Backup/UserData/Downloads --progress
-          rclone sync "$userPath\Pictures" gdrive:/RDP_Backup/UserData/Pictures --progress
-          rclone sync "$userPath\Videos" gdrive:/RDP_Backup/UserData/Videos --progress
-          
-          # Tetap backup AppData\Roaming karena berisi konfigurasi penting.
-          echo "Backing up AppData\Roaming..."
-          rclone sync "$userPath\AppData\Roaming" gdrive:/RDP_Backup/UserData/AppData/Roaming --progress
-          
-          echo "--- Backup Complete ---"
+          $botToken = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          $chatId   = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          $runId    = $env:GITHUB_RUN_ID
+          $endTime  = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
 
+          $msgEnd = "SESI RDP BERAKHIR`n`nWaktu berakhir: $endTime`nRun ID        : $runId`n`nGunakan /rdp untuk memulai sesi baru."
+          $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgEnd -replace '"','\"' -replace "`n",'\n')))
+          Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body

@@ -1,0 +1,33 @@
+name: Telegram RDP Bot
+
+on:
+  # Jalankan secara manual
+  workflow_dispatch:
+  # Otomatis restart setiap 6 jam agar bot selalu aktif
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 3. Install Dependencies
+        run: pip install requests
+
+      - name: 4. Run Telegram Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python bot.py
