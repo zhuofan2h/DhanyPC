@@ -15,6 +15,15 @@ jobs:
       - name: 2. Configure RDP & Connect Tailscale
         shell: powershell
         run: |
+          # ── Validasi secrets wajib ───────────────────────────────────────
+          $botToken = "${{ secrets.BOT_TOKEN }}"
+          $chatId   = "${{ secrets.CHAT_ID }}"
+          $tsKey    = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+
+          if (-not $botToken) { throw "Secret BOT_TOKEN tidak di-set di GitHub." }
+          if (-not $chatId)   { throw "Secret CHAT_ID tidak di-set di GitHub." }
+          if (-not $tsKey)    { throw "Secret TAILSCALE_AUTH_KEY tidak di-set di GitHub." }
+
           # ── Konfigurasi RDP ──────────────────────────────────────────────
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           netsh advfirewall firewall add rule name="Allow RDP" dir=in action=allow protocol=TCP localport=3389
@@ -23,29 +32,42 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "dhasap"
 
           # ── Install & Hubungkan Tailscale ────────────────────────────────
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
+          Write-Host "Mengunduh Tailscale..."
+          try {
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe" -TimeoutSec 120
+          } catch {
+            throw "Gagal mengunduh Tailscale: $_"
+          }
+
           Start-Process -FilePath ".\tailscale-setup.exe" -ArgumentList "/quiet" -Wait
           $env:Path += ";C:\Program Files\Tailscale"
-          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$($env:GITHUB_RUN_ID)
+
+          Write-Host "Menghubungkan ke Tailscale..."
+          tailscale up --authkey=$tsKey --hostname=gh-runner-$($env:GITHUB_RUN_ID)
+          if ($LASTEXITCODE -ne 0) {
+            throw "tailscale up gagal (exit code $LASTEXITCODE). Periksa apakah TAILSCALE_AUTH_KEY masih valid."
+          }
 
           # Tunggu Tailscale IP
           $tsIP = $null; $retries = 0
           while (-not $tsIP -and $retries -lt 12) {
-            $tsIP = tailscale ip -4
+            $tsIP = tailscale ip -4 2>$null
             if (-not $tsIP) { Start-Sleep -Seconds 5; $retries++ }
           }
-          if (-not $tsIP) { throw "Tailscale IP tidak berhasil didapat." }
+          if (-not $tsIP) { throw "Tailscale IP tidak berhasil didapat setelah 60 detik. Periksa status Tailscale." }
 
           # ── Kirim notifikasi RDP siap ke Telegram ────────────────────────
-          $botToken  = "${{ secrets.BOT_TOKEN }}"
-          $chatId    = "${{ secrets.CHAT_ID }}"
           $runId     = $env:GITHUB_RUN_ID
           $startTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
           $endTime   = (Get-Date).AddMinutes(355).ToString("yyyy-MM-dd HH:mm:ss UTC")
 
           $msgReady  = "RDP SIAP`n`nAlamat  : $tsIP`nUsername: dhasap`nPassword: User123`n`nMulai   : $startTime`nBerakhir: $endTime`nRun ID  : $runId"
           $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgReady -replace '"','\"' -replace "`n",'\n')))
-          Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
+          try {
+            Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
+          } catch {
+            Write-Warning "Gagal kirim notifikasi Telegram: $_"
+          }
 
           Write-Host "=== RDP ACCESS READY ===" -ForegroundColor Green
           Write-Host "Address : $tsIP"
@@ -76,7 +98,11 @@ jobs:
 
               $msgUpd = "Update Sesi RDP`n`nWaktu   : $timeNow UTC`nSisa    : $hours jam $mins menit`nRun ID  : $runId"
               $bodyUpd = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgUpd -replace '"','\"' -replace "`n",'\n')))
-              Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $bodyUpd
+              try {
+                Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $bodyUpd
+              } catch {
+                Write-Warning "Gagal kirim update Telegram: $_"
+              }
 
               $nextUpdate = (Get-Date).AddSeconds($interval)
             }
@@ -91,6 +117,15 @@ jobs:
           $runId    = $env:GITHUB_RUN_ID
           $endTime  = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
 
+          if (-not $botToken -or -not $chatId) {
+            Write-Warning "BOT_TOKEN atau CHAT_ID tidak di-set, notifikasi akhir dilewati."
+            exit 0
+          }
+
           $msgEnd = "SESI RDP BERAKHIR`n`nWaktu berakhir: $endTime`nRun ID        : $runId`n`nGunakan /rdp untuk memulai sesi baru."
           $body = [System.Text.Encoding]::UTF8.GetBytes(("{""chat_id"":""{0}"",""text"":""{1}""}" -f $chatId, ($msgEnd -replace '"','\"' -replace "`n",'\n')))
-          Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
+          try {
+            Invoke-RestMethod -Uri "https://api.telegram.org/bot$botToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body $body
+          } catch {
+            Write-Warning "Gagal kirim notifikasi akhir Telegram: $_"
+          }

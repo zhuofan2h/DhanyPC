@@ -20,10 +20,11 @@ wrangler login
 ## 2. Set Secrets
 
 ```bash
-wrangler secret put TELEGRAM_BOT_TOKEN   # token dari BotFather
-wrangler secret put TELEGRAM_CHAT_ID     # chat ID kamu (cek via @userinfobot)
-wrangler secret put GH_PAT_TOKEN         # GitHub PAT
-wrangler secret put GH_REPO              # format: owner/repo  (contoh: zhuofan2h/rdp)
+wrangler secret put BOT_TOKEN        # token dari BotFather
+wrangler secret put CHAT_ID          # chat ID kamu (cek via @userinfobot)
+wrangler secret put GH_PAT_TOKEN     # GitHub PAT
+wrangler secret put GH_REPO          # format: owner/repo  (contoh: zhuofan2h/rdp)
+wrangler secret put WEBHOOK_SECRET   # string rahasia bebas untuk validasi webhook
 ```
 
 ---
@@ -64,9 +65,9 @@ Pastikan secrets berikut ada di repository GitHub:
 
 | Secret | Keterangan |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | Token bot Telegram |
-| `TELEGRAM_CHAT_ID` | Chat ID kamu |
-| `TAILSCALE_AUTH_KEY` | Auth key Tailscale |
+| `BOT_TOKEN` | Token bot Telegram |
+| `CHAT_ID` | Chat ID kamu |
+| `TAILSCALE_AUTH_KEY` | Auth key Tailscale (perbarui jika kadaluarsa) |
 
 ---
 
